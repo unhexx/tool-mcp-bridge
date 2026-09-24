@@ -1,0 +1,32 @@
+name: tool-mcp-bridge
+
+services:
+  tool:
+    build: .
+    image: tool-mcp-bridge:local
+    ports:
+      - "127.0.0.1:8096:8096"
+    environment:
+      TOOL_HOST: "0.0.0.0"
+      TOOL_PORT: "8096"
+      TOOL_TOKEN: "${TOOL_TOKEN:-local}"
+      MCP_SERVERS: "${MCP_SERVERS:-[ ]}"
+
+    volumes:
+      - /tmp/tool-mcp:/tmp/tool-data
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    mem_limit: 256m
+    pids_limit: 128
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8096/healthz')"]
+      interval: 20s
+      timeout: 5s
+      start_period: 10s
+      retries: 5

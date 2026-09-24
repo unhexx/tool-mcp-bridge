@@ -1,0 +1,29 @@
+[project]
+name = "tool-mcp-bridge"
+version = "1.0.0"
+description = "Local MCP client-side bridge (no xAI hosted MCP)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Evgeniy Chistyakov", email = "unhandled@exception.expert" }]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0,<9"]
+
+[project.scripts]
+tool-mcp-bridge = "tool_mcp_bridge.server:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.setuptools]
+py-modules = ["tool_http"]
