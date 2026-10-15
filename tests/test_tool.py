@@ -1,6 +1,9 @@
 import json
 import logging
 import sys
+import threading
+from http.client import HTTPConnection
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -8,9 +11,10 @@ from mcp.server.lowlevel.server import Server
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ElicitRequest, ElicitRequestFormParams, InputRequiredResult, ListToolsResult
+from tool_http import make_handler
 
 from tool_mcp_bridge.child import execute, stdio_params
-from tool_mcp_bridge.server import run
+from tool_mcp_bridge.server import SCHEMA, TOOL, run
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MODERN = FIXTURES / "modern_stdio.py"
@@ -278,3 +282,81 @@ def test_logger_and_no_stderr_key(monkeypatch, caplog):
     assert isinstance(warning.duration_ms, int)
     assert warning.outcome == "error"
     assert "boom-stderr" in warning.getMessage()
+
+
+def _post_invoke(body: dict) -> tuple[int, dict]:
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(TOOL, SCHEMA, run))
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    try:
+        host, port = httpd.server_address
+        raw = json.dumps(body).encode("utf-8")
+        conn = HTTPConnection(host, port, timeout=20)
+        try:
+            conn.request(
+                "POST",
+                "/v1/invoke",
+                body=raw,
+                headers={
+                    "Authorization": "Bearer local",
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(raw)),
+                },
+            )
+            response = conn.getresponse()
+            payload = json.loads(response.read().decode("utf-8"))
+            return response.status, payload
+        finally:
+            conn.close()
+    finally:
+        httpd.shutdown()
+        thread.join(timeout=5)
+        httpd.server_close()
+
+
+def _keys(value: object) -> set[str]:
+    found: set[str] = set()
+    if isinstance(value, dict):
+        found.update(value)
+        for item in value.values():
+            found.update(_keys(item))
+    elif isinstance(value, list):
+        for item in value:
+            found.update(_keys(item))
+    return found
+
+
+def test_http_200_for_is_error(monkeypatch):
+    monkeypatch.setenv("TOOL_TOKEN", "local")
+    monkeypatch.setenv("MCP_SERVERS", json.dumps([_modern_entry()]))
+    status, payload = _post_invoke(
+        {"arguments": {"server_label": "modern", "tool_name": "fail", "arguments": {}}}
+    )
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["tool"] == "mcp_call"
+    assert payload["result"]["isError"] is True
+    assert payload["result"]["resultType"] == "complete"
+    assert "stderr" not in _keys(payload)
+    assert "command" not in _keys(payload)
+
+
+def test_http_400_for_mcp_timeout(monkeypatch):
+    monkeypatch.setenv("TOOL_TOKEN", "local")
+    monkeypatch.setenv("MCP_TIMEOUT", "1")
+    monkeypatch.setenv(
+        "MCP_SERVERS",
+        json.dumps(
+            [
+                {
+                    "label": "silent",
+                    "command": [sys.executable, "-c", "import time; time.sleep(30)"],
+                }
+            ]
+        ),
+    )
+    status, payload = _post_invoke(
+        {"arguments": {"server_label": "silent", "tool_name": "ping", "arguments": {}}}
+    )
+    assert status == 400
+    assert str(payload["error"]).startswith("mcp timeout after 1s")
