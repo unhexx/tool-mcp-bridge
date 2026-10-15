@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Evgeniy Chistyakov", email = "unhandled@exception.expert" }]
-dependencies = []
+dependencies = ["mcp>=2,<3"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0,<9"]
